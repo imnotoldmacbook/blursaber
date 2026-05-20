@@ -1,21 +1,6 @@
-# Blur Sabers
+# blur saber yeah
 
-Adds a configurable runtime blur/trail layer to Beat Saber sabers on Quest.
-
-Use `Settings > Mod Settings > Blur Sabers` in-game to change:
-
-* enabled/disabled
-* trail time
-* trail width
-* alpha
-* tip offset
-* RGB trail color
-
-Your custom saber model still needs to be exported from Unity/Qosmetics as a Quest saber asset. Beat Saber on Quest cannot import a raw `.fbx` file at runtime from this native mod by itself.
-
-## Build note
-
-Run `qpm restore` before building. QPM needs Git available on `PATH` so it can clone dependency packages into its cache.
+hi reezonate, if u see this then yea
 
 ## Credits
 
