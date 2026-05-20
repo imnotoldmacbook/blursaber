@@ -1,3 +1,4 @@
+// Must be first — CMake passes -DID="blursaber" which collides with fmt's ID template param
 #undef ID
 
 #include "config.hpp"
@@ -15,6 +16,8 @@
 #include "UnityEngine/Quaternion.hpp"
 #include "UnityEngine/Time.hpp"
 #include "UnityEngine/MonoBehaviour.hpp"
+#include "UnityEngine/MeshRenderer.hpp"
+#include "UnityEngine/PrimitiveType.hpp"
 
 #include "custom-types/shared/register.hpp"
 #include "custom-types/shared/macros.hpp"
@@ -26,6 +29,8 @@
 
 #include "scotland2/shared/modloader.h"
 #include "paper2_scotland2/shared/logger.hpp"
+
+#include <cmath>
 
 // ─── Logger / modinfo ────────────────────────────────────────────────────────
 
@@ -60,14 +65,17 @@ bool LoadConfig() {
     return true;
 }
 
+// ─── Smoothing helper ────────────────────────────────────────────────────────
+
+static float smoothing_to_factor(float s, float dt) {
+    float speed = 50.0f * (1.0f - s) + 0.5f * s;
+    return std::exp(-speed * dt);
+}
+
 // ─── SaberSmoothing ──────────────────────────────────────────────────────────
-//
-// Attached to each saber model root. Every Update() it reads the *parent*
-// transform (the real controller position) and lerps the visual saber toward
-// it, creating the ReeSabers-style motion smoothing effect.
 
 DECLARE_CLASS_CODEGEN(BlurSabers, SaberSmoothing, UnityEngine::MonoBehaviour) {
-    DECLARE_INSTANCE_FIELD(UnityEngine::Transform*, _parent);
+    DECLARE_INSTANCE_FIELD(UnityEngine::Transform*, _target);
     DECLARE_INSTANCE_METHOD(void, Awake);
     DECLARE_INSTANCE_METHOD(void, Update);
 public:
@@ -79,21 +87,19 @@ public:
 DEFINE_TYPE(BlurSabers, SaberSmoothing);
 
 void BlurSabers::SaberSmoothing::Awake() {
-    // The saber model sits under a parent that tracks the real controller
-    _parent     = get_transform()->get_parent();
+    // _target is set externally after AddComponent
     initialized = false;
 }
 
 void BlurSabers::SaberSmoothing::Update() {
     using namespace UnityEngine;
 
-    if (!_parent) return;
+    if (!_target) return;
 
-    Vector3    targetPos = _parent->get_position();
-    Quaternion targetRot = _parent->get_rotation();
+    Vector3    targetPos = _target->get_position();
+    Quaternion targetRot = _target->get_rotation();
 
     if (!blurConfig.enabled) {
-        // Disabled — snap to real position with no lag
         get_transform()->set_position(targetPos);
         get_transform()->set_rotation(targetRot);
         return;
@@ -105,9 +111,6 @@ void BlurSabers::SaberSmoothing::Update() {
         initialized = true;
     }
 
-    // smoothing: 0 = instant snap, 1 = never moves
-    // We convert to a per-frame lerp factor using deltaTime so it's
-    // framerate-independent. Factor of ~8–15 gives a ReeSabers-like feel.
     float dt     = Time::get_deltaTime();
     float factor = 1.0f - smoothing_to_factor(blurConfig.smoothing, dt);
 
@@ -116,17 +119,6 @@ void BlurSabers::SaberSmoothing::Update() {
 
     get_transform()->set_position(smoothPos);
     get_transform()->set_rotation(smoothRot);
-}
-
-// Free function used above — converts a 0–1 "smoothing" slider value into
-// a per-frame lerp alpha that is framerate-independent.
-//   smoothing=0  → factor=0  → lerp(pos, target, 1)  = instant snap
-//   smoothing=1  → factor≈1  → lerp(pos, target, ~0) = nearly frozen
-// We use exponential decay: alpha = exp(-speed * dt)
-// speed maps smoothing 0→1 to speed 50→0.5
-static float smoothing_to_factor(float s, float dt) {
-    float speed = 50.0f * (1.0f - s) + 0.5f * s;  // lerp between 50 and 0.5
-    return std::exp(-speed * dt);
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
@@ -142,9 +134,42 @@ MAKE_HOOK_MATCH(
 ) {
     SaberModelController_Init(self, parent, initData, movementData);
 
-    auto* go = self->get_gameObject();
-    if (!go->GetComponent<BlurSabers::SaberSmoothing*>())
-        go->AddComponent<BlurSabers::SaberSmoothing*>();
+    using namespace UnityEngine;
+
+    auto* saberRoot = self->get_transform();
+
+    // ── Hide all existing mesh renderers on the default/custom saber ──────
+    auto* renderers = self->get_gameObject()->GetComponentsInChildren<MeshRenderer*>();
+    for (int i = 0; i < (int)renderers->get_Count(); i++)
+        renderers->get_Item(i)->set_enabled(false);
+
+    // ── Create a cylinder to act as our test blade ────────────────────────
+    // CreatePrimitive spawns at world origin; we'll position it locally
+    auto* blade = GameObject::CreatePrimitive(PrimitiveType::Cylinder);
+    blade->set_name("BlurBlade");
+
+    // Parent it to the saber root so it inherits controller movement
+    auto* bladeT = blade->get_transform();
+    bladeT->SetParent(saberRoot, false);
+
+    // A Unity cylinder is 2 units tall and 1 unit wide by default.
+    // Beat Saber sabers are ~1 m long and ~0.02 m wide.
+    // Scale: x=0.02, y=0.5 (half-height gives 1m total), z=0.02
+    bladeT->set_localScale(Vector3{0.02f, 0.5f, 0.02f});
+
+    // Offset so the bottom of the cylinder sits at the hilt (local origin)
+    // Unity cylinder pivot is centered, so shift up by half its height (0.5)
+    bladeT->set_localPosition(Vector3{0.0f, 0.5f, 0.0f});
+
+    // Beat Saber sabers point along local +Z, Unity cylinders along local +Y
+    // Rotate 90° around X to align them
+    bladeT->set_localEulerAngles(Vector3{90.0f, 0.0f, 0.0f});
+
+    // ── Attach smoothing — track the saber root transform ─────────────────
+    if (!blade->GetComponent<BlurSabers::SaberSmoothing*>()) {
+        auto* smooth  = blade->AddComponent<BlurSabers::SaberSmoothing*>();
+        smooth->_target = saberRoot;
+    }
 }
 
 // ─── Settings UI ─────────────────────────────────────────────────────────────
@@ -158,7 +183,6 @@ void DidActivate(HMUI::ViewController* self, bool firstActivation,
     BSML::Lite::CreateToggle(t, "Enable Smoothing", blurConfig.enabled,
         [](bool v){ blurConfig.enabled = v; SaveConfig(); });
 
-    // 0.0 = no lag (instant), 0.99 = very heavy lag
     BSML::Lite::CreateSliderSetting(t, "Smoothing Amount",
         0.01f, blurConfig.smoothing, 0.0f, 0.99f, 0.0f,
         [](float v){ blurConfig.smoothing = v; SaveConfig(); });
