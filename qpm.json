@@ -21,7 +21,7 @@
   "dependencies": [
     {
       "id": "beatsaber-hook",
-      "versionRange": "=4.0.2",
+      "versionRange": "^7.4.2",
       "additionalData": {
         "extraFiles": [
           "src/inline-hook"
@@ -30,12 +30,17 @@
     },
     {
       "id": "modloader",
-      "versionRange": "=1.2.3",
+      "versionRange": "^1.3.0",
       "additionalData": {}
     },
     {
-      "id": "questui",
-      "versionRange": "^0.18.1",
+      "id": "custom-types",
+      "versionRange": "^0.18.3",
+      "additionalData": {}
+    },
+    {
+      "id": "bsml",
+      "versionRange": "^0.4.55",
       "additionalData": {}
     }
   ]
