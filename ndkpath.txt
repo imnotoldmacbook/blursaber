@@ -1,1 +1,1 @@
-C:/Users/duoha/AppData/Local/Android/Sdk/ndk/30.0.14904198
+C:/Users/YOURPCGOESHERE/AppData/Local/Android/Sdk/ndk/25.2.9519653
